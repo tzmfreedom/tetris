@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/hajimehoshi/ebiten"
 	"github.com/hajimehoshi/ebiten/ebitenutil"
+	"github.com/hajimehoshi/ebiten/inpututil"
 	"github.com/k0kubun/pp"
 	"image/color"
 	"log"
@@ -11,14 +12,22 @@ import (
 	"time"
 )
 
-var timer, x, y, currentType, currentRotate, score, phase, nextType int
+var timer int
+var x, y int
+var currentType int
+var currentRotate int
+var score int
+var phase int
+var nextType int
+var dropTime int
+var landingCount int
 
 const (
 	screenWidth = 320
-	screenHeight = 320
+	screenHeight = 480
 	blockSize = 24
 	maxBlockX = 10
-	maxBlockY = 13
+	maxBlockY = 20
 	initBlockX = 3
 	scoreX = 200
 	scoreY = 0
@@ -51,6 +60,30 @@ const (
 	PHASE_GAMESTART = iota
 	PHASE_GAMEOVER
 )
+
+var DROPTIME_LEVEL = []int{
+	60,
+	50,
+	40,
+	30,
+	20,
+	10,
+	5,
+	4,
+	3,
+}
+
+var LEVEL_SCORE = []int{
+	0,
+	1000,
+	3000,
+	6000,
+	10000,
+	15000,
+	21000,
+	28000,
+	36000,
+}
 
 var blockTypes = map[int][][]int{
 	TYPE_1: {
@@ -93,9 +126,8 @@ var blockTypes = map[int][][]int{
 func update(screen *ebiten.Image) error {
 	if phase != PHASE_GAMEOVER {
 		timer++
-		if timer % 7 == 0 {
-			handleInput()
-		}
+		landingCount++
+		handleInput()
 	}
 	if phase == PHASE_GAMEOVER {
 		ebitenutil.DebugPrint(screen, "GAME OVER!: " + strconv.Itoa(score))
@@ -107,6 +139,10 @@ func update(screen *ebiten.Image) error {
 	}
 	//ebitenutil.DebugPrint(screen, "Hello, World!")
 	//ebitenutil.DebugPrint(screen, "Hello, World!")
+	if landingCount >= dropTime {
+		handleDown()
+		landingCount = 0
+	}
 	draw(screen)
 	return nil
 }
@@ -114,52 +150,26 @@ func update(screen *ebiten.Image) error {
 var backgroundBlocks = make([][]int, maxBlockY)
 
 func main() {
-	if err := ebiten.Run(update, screenWidth, screenHeight, 2, "Hello, World!"); err != nil {
+	if err := ebiten.Run(update, screenWidth, screenHeight, 1, "Tetris!"); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func handleInput() {
-	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
+	if v := inpututil.KeyPressDuration(ebiten.KeyLeft); v == 1 || (v >= 10 && v%3 == 0) {
 		if !isConflict(-1, 0) {
 			x--
 		}
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyRight) {
+	if v := inpututil.KeyPressDuration(ebiten.KeyRight); v == 1 || (v >= 10 && v%3 == 0) {
 		if !isConflict(1, 0) {
 			x++
 		}
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyDown) {
-		if !isConflict(0, 1) {
-			y++
-		} else {
-			current := currentBlock()
-			for i, line := range current {
-				if y+i >= maxBlockY {
-					break
-				}
-				for j, block := range line {
-					if x+j >= maxBlockX {
-						continue
-					}
-					if block == 1 {
-						backgroundBlocks[y+i][x+j] = 1
-					}
-				}
-			}
-			handleLineClear()
-			x = initBlockX
-			y = 0
-			currentRotate = ROTATE_0
-			currentType = nextType
-			nextType = generateBlock()
-			if isConflict(0, 0) {
-				phase = PHASE_GAMEOVER
-			}
-		}
+	if v := inpututil.KeyPressDuration(ebiten.KeyDown); v > 0 && v%3 == 0 {
+		handleDown()
 	}
-	if ebiten.IsKeyPressed(ebiten.KeySpace) {
+	if v := inpututil.KeyPressDuration(ebiten.KeySpace); v == 1 {
 		before := currentRotate
 		if currentRotate == ROTATE_270 {
 			currentRotate = ROTATE_0
@@ -170,6 +180,38 @@ func handleInput() {
 			currentRotate = before
 		}
 	}
+}
+
+func handleDown() {
+	if !isConflict(0, 1) {
+		y++
+	} else {
+		current := currentBlock()
+		for i, line := range current {
+			if y+i >= maxBlockY {
+				break
+			}
+			for j, block := range line {
+				if x+j >= maxBlockX {
+					continue
+				}
+				if block == 1 {
+					backgroundBlocks[y+i][x+j] = 1
+				}
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+		handleLineClear()
+		x = initBlockX
+		y = 0
+		currentRotate = ROTATE_0
+		currentType = nextType
+		nextType = generateBlock()
+		if isConflict(0, 0) {
+			phase = PHASE_GAMEOVER
+		}
+	}
+
 }
 
 func draw(screen *ebiten.Image) {
@@ -236,6 +278,19 @@ func handleLineClear() {
 		score += 1000
 	}
 	backgroundBlocks = newBackgroundBlocks
+	dropTime = DROPTIME_LEVEL[currentLevel()]
+}
+
+func currentLevel() int {
+	index := 0
+	for i, levelScore := range LEVEL_SCORE {
+		if score > levelScore {
+			index = i
+		} else {
+			break
+		}
+	}
+	return index
 }
 
 func isLineClear(line []int) bool {
@@ -303,6 +358,7 @@ func generateBlock() int {
 
 func init() {
 	timer = 0
+	landingCount = 0
 	score = 0
 	x = initBlockX
 	y = 0
@@ -310,6 +366,7 @@ func init() {
 	currentType = generateBlock()
 	nextType = generateBlock()
 	phase = PHASE_GAMESTART
+	dropTime = DROPTIME_LEVEL[0]
 	for i, _ := range backgroundBlocks {
 		backgroundBlocks[i] = make([]int, maxBlockX)
 	}
